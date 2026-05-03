@@ -1,0 +1,59 @@
+name: Build Termux RootFS
+
+env:
+  ANDROID_HOME: /home/runner/lib/android-sdk-9123335/
+  ANDROID_NDK_ROOT: /home/runner/lib/android-ndk-r29/
+  CLEAN_DOCKER_IMAGES: true
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_name:
+        description: "Package name for release tag (example: com.termux)"
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set package name
+        run: echo "PACKAGE_NAME=${{ github.event.inputs.package_name }}" >> $GITHUB_ENV
+
+      # 🔹 Build bootstrap only
+      - name: Build bootstrap (arm, aarch64, i686, x86_64)
+        run: |
+          ./build-termux.sh \
+            --architectures arm,aarch64,i686,x86_64 \
+            --disable-terminal \
+            --disable-tasker \
+            --disable-float \
+            --disable-widget \
+            --disable-api \
+            --disable-boot \
+            --disable-styling \
+            --disable-gui \
+            --disable-x11
+
+      # 🔥 Delete old release if exists
+      - name: Delete existing release
+        continue-on-error: true
+        run: |
+          gh release delete "rootfs-${PACKAGE_NAME}" --yes || true
+          git push --delete origin "rootfs-${PACKAGE_NAME}" || true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 🚀 Create new release
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: rootfs-${{ env.PACKAGE_NAME }}
+          name: rootfs-${{ env.PACKAGE_NAME }}
+          files: |
+            ./*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
