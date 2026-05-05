@@ -1,0 +1,169 @@
+name: Build any termux-packages package
+
+on:
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: "Packages to build (space-separated), e.g. apt git zip"
+        required: true
+      package-prefix:
+        description: "Optional prefix added to every package name (e.g. my-)"
+        required: false
+        default: ""
+      package-dirs:
+        description: "Package dirs (comma-separated): disabled-packages,packages,root-packages,x11-packages"
+        required: false
+        default: "disabled-packages,packages,root-packages,x11-packages"
+      architectures:
+        description: "CPU ABI list (comma-separated): arm,aarch64,i686,x86_64"
+        required: false
+        default: "aarch64"
+      target-repo:
+        description: "termux-packages repository"
+        required: false
+        default: "termux/termux-packages"
+      target-ref:
+        description: "Branch/tag/SHA of termux-packages"
+        required: false
+        default: "master"
+      with-deps:
+        description: "Build dependencies of selected packages"
+        type: boolean
+        required: false
+        default: true
+      skip-checks:
+        description: "Skip package lint/checks"
+        type: boolean
+        required: false
+        default: false
+      clean-before-build:
+        description: "Clean previous build artifacts before building"
+        type: boolean
+        required: false
+        default: true
+      use-remote-docker:
+        description: "Use --remote in run-docker.sh"
+        type: boolean
+        required: false
+        default: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v4
+
+      - name: Clone termux-packages
+        run: |
+          git clone --depth 1 --branch "${{ github.event.inputs.target-ref }}" "https://github.com/${{ github.event.inputs.target-repo }}.git" termux-packages
+
+      - name: Resolve package list and build options
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t allowed_abis < <(printf '%s\n' arm aarch64 i686 x86_64)
+          IFS=',' read -r -a abi_arr <<< "${{ github.event.inputs.architectures }}"
+          normalized_abis=()
+          for raw in "${abi_arr[@]}"; do
+            abi="$(echo "$raw" | xargs)"
+            [[ -z "$abi" ]] && continue
+            if ! printf '%s\n' "${allowed_abis[@]}" | grep -qx "$abi"; then
+              echo "Unsupported ABI: $abi"
+              echo "Allowed ABIs: arm,aarch64,i686,x86_64"
+              exit 1
+            fi
+            normalized_abis+=("$abi")
+          done
+          if [[ ${#normalized_abis[@]} -eq 0 ]]; then
+            echo "No valid ABI provided."
+            exit 1
+          fi
+
+          IFS=',' read -r -a dir_arr <<< "${{ github.event.inputs.package-dirs }}"
+          normalized_dirs=()
+          for raw in "${dir_arr[@]}"; do
+            dir="$(echo "$raw" | xargs)"
+            [[ -z "$dir" ]] && continue
+            case "$dir" in
+              disabled-packages|packages|root-packages|x11-packages) normalized_dirs+=("$dir") ;;
+              *) echo "Unsupported package dir: $dir"; exit 1 ;;
+            esac
+          done
+          if [[ ${#normalized_dirs[@]} -eq 0 ]]; then
+            echo "No valid package directories selected."
+            exit 1
+          fi
+
+          prefix="${{ github.event.inputs.package-prefix }}"
+          read -r -a raw_pkgs <<< "${{ github.event.inputs.packages }}"
+          if [[ ${#raw_pkgs[@]} -eq 0 ]]; then
+            echo "No packages were provided."
+            exit 1
+          fi
+
+          resolved_pkgs=()
+          for pkg in "${raw_pkgs[@]}"; do
+            candidate="${prefix}${pkg}"
+            found=""
+            for dir in "${normalized_dirs[@]}"; do
+              if [[ -f "termux-packages/${dir}/${candidate}/build.sh" ]]; then
+                found="$candidate"
+                break
+              fi
+            done
+            if [[ -z "$found" ]]; then
+              echo "Package not found in selected directories: $candidate"
+              exit 1
+            fi
+            resolved_pkgs+=("$found")
+          done
+
+          printf 'abis=%s\n' "$(IFS=','; echo "${normalized_abis[*]}")" >> "$GITHUB_OUTPUT"
+          printf 'packages=%s\n' "$(IFS=' '; echo "${resolved_pkgs[*]}")" >> "$GITHUB_OUTPUT"
+
+      - name: Build selected packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd termux-packages
+
+          if [[ "${{ github.event.inputs.clean-before-build }}" == 'true' ]]; then
+            ./scripts/run-docker.sh ./build-package.sh -c
+          fi
+
+          docker_args=()
+          if [[ "${{ github.event.inputs.use-remote-docker }}" == 'true' ]]; then
+            docker_args+=(--remote)
+          fi
+
+          build_args=()
+          if [[ "${{ github.event.inputs.with-deps }}" == 'true' ]]; then
+            build_args+=(-I)
+          fi
+          if [[ "${{ github.event.inputs.skip-checks }}" == 'true' ]]; then
+            build_args+=(-s)
+          fi
+
+          for abi in $(echo "${{ steps.resolve.outputs.abis }}" | tr ',' ' '); do
+            for pkg in ${{ steps.resolve.outputs.packages }}; do
+              ./scripts/run-docker.sh "${docker_args[@]}" ./build-package.sh -a "$abi" "${build_args[@]}" "$pkg"
+            done
+          done
+
+      - name: Pack all built packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          find termux-packages/output -type f \
+            \( -name "*.deb" -o -name "*.buildinfo" -o -name "*.changes" -o -name "*.log" \) \
+            -print0 | tar --null -czf artifacts/termux-packages-custom-build.tar.gz --files-from -
+
+      - name: Upload packed artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: termux-packages-custom-build
+          path: artifacts/termux-packages-custom-build.tar.gz
+          if-no-files-found: error
