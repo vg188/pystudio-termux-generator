@@ -58,6 +58,23 @@ jobs:
         run: |
           git clone --depth 1 --branch "${{ github.event.inputs.target-ref }}" "https://github.com/${{ github.event.inputs.target-repo }}.git" termux-packages
 
+
+      - name: Prepare comprehensive build environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends             build-essential             cmake             ninja-build             autoconf             automake             libtool             pkg-config             openjdk-17-jdk-headless             unzip             zip             p7zip-full             python3             python3-pip             wget             curl             git             jq
+          java -version
+          cmake --version
+
+      - name: Bootstrap termux-packages host tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd termux-packages
+          ./scripts/setup-ubuntu.sh
+
       - name: Resolve package list and build options
         id: resolve
         shell: bash
