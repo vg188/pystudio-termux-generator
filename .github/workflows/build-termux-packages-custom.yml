@@ -60,12 +60,32 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          REF="${{ github.event.inputs.target-ref }}"
+          REPO_URL="https://github.com/${{ github.event.inputs.target-repo }}.git"
+
+          resolve_ref() {
+            local requested="$1"
+            if git ls-remote --exit-code --heads "$REPO_URL" "$requested" >/dev/null 2>&1 ||                git ls-remote --exit-code --tags "$REPO_URL" "$requested" >/dev/null 2>&1; then
+              echo "$requested"
+            elif git ls-remote --exit-code --heads "$REPO_URL" master >/dev/null 2>&1; then
+              echo "master"
+            elif git ls-remote --exit-code --heads "$REPO_URL" main >/dev/null 2>&1; then
+              echo "main"
+            else
+              echo "[!] Cannot resolve target-ref '$requested' on $REPO_URL" >&2
+              exit 1
+            fi
+          }
+
+          RESOLVED_REF="$(resolve_ref "$REF")"
+          echo "Using ref: $RESOLVED_REF"
+
           if [[ -d termux-packages-main/.git ]]; then
             echo "Use existing termux-packages-main from termux-generator"
-            git -C termux-packages-main fetch --depth 1 origin "${{ github.event.inputs.target-ref }}"
+            git -C termux-packages-main fetch --depth 1 origin "$RESOLVED_REF"
             git -C termux-packages-main checkout -f FETCH_HEAD
           else
-            git clone --depth 1 --branch "${{ github.event.inputs.target-ref }}" "https://github.com/${{ github.event.inputs.target-repo }}.git" termux-packages-main
+            git clone --depth 1 --branch "$RESOLVED_REF" "$REPO_URL" termux-packages-main
           fi
 
       - name: Install custom local packages into termux-packages-main
