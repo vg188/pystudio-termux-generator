@@ -26,13 +26,8 @@ on:
         description: "Branch/tag/SHA of termux-packages"
         required: false
         default: "master"
-      with-deps:
-        description: "Build dependencies of selected packages"
-        type: boolean
-        required: false
-        default: true
       skip-checks:
-        description: "Skip package lint/checks"
+        description: "Skip package lint/checks (dependencies are always built)"
         type: boolean
         required: false
         default: false
@@ -158,8 +153,7 @@ jobs:
           cd termux-packages-main
           [[ "${{ github.event.inputs.clean-before-build }}" == 'true' ]] && ./scripts/run-docker.sh ./build-package.sh -c
 
-          build_args=()
-          [[ "${{ github.event.inputs.with-deps }}" == 'true' ]] && build_args+=(-I)
+          build_args=(-I)
           [[ "${{ github.event.inputs.skip-checks }}" == 'true' ]] && build_args+=(-s)
 
           for abi in $(echo "${{ steps.resolve.outputs.abis }}" | tr ',' ' '); do
