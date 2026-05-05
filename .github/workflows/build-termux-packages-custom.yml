@@ -7,9 +7,9 @@ on:
         description: "Packages to build (space-separated), e.g. apt git zip"
         required: true
       package-prefix:
-        description: "Optional prefix added to every package name (e.g. my-)"
+        description: "Bootstrap package name prefix (e.g. com.termux -> android.zero.studio style rename scope)"
         required: false
-        default: ""
+        default: "com.termux"
       package-dirs:
         description: "Package dirs (comma-separated): disabled-packages,packages,root-packages,x11-packages"
         required: false
@@ -41,11 +41,6 @@ on:
         type: boolean
         required: false
         default: true
-      use-remote-docker:
-        description: "Use --remote in run-docker.sh"
-        type: boolean
-        required: false
-        default: false
 
 jobs:
   build:
@@ -54,25 +49,47 @@ jobs:
       - name: Checkout current repository
         uses: actions/checkout@v4
 
-      - name: Clone termux-packages
-        run: |
-          git clone --depth 1 --branch "${{ github.event.inputs.target-ref }}" "https://github.com/${{ github.event.inputs.target-repo }}.git" termux-packages
-
-
       - name: Prepare comprehensive build environment
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends             build-essential             cmake             ninja-build             autoconf             automake             libtool             pkg-config             openjdk-17-jdk-headless             unzip             zip             p7zip-full             python3             python3-pip             wget             curl             git             jq
-          java -version
-          cmake --version
+          sudo apt-get install -y --no-install-recommends git jq
+
+      - name: Prepare termux-packages source (termux-generator managed)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -d termux-packages-main/.git ]]; then
+            echo "Use existing termux-packages-main from termux-generator"
+            git -C termux-packages-main fetch --depth 1 origin "${{ github.event.inputs.target-ref }}"
+            git -C termux-packages-main checkout -f FETCH_HEAD
+          else
+            git clone --depth 1 --branch "${{ github.event.inputs.target-ref }}" "https://github.com/${{ github.event.inputs.target-repo }}.git" termux-packages-main
+          fi
+
+      - name: Install custom local packages into termux-packages-main
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -d custom-packages ]]; then
+            mkdir -p termux-packages-main/packages
+            cp -a custom-packages/* termux-packages-main/packages/
+          fi
+
+      - name: Apply termux-generator style bootstrap rename
+        shell: bash
+        run: |
+          set -euo pipefail
+          export TERMUX_APP__PACKAGE_NAME="${{ github.event.inputs.package-prefix }}"
+          source scripts/termux_generator_utils.sh
+          replace_termux_name termux-packages-main "$TERMUX_APP__PACKAGE_NAME"
 
       - name: Bootstrap termux-packages host tools
         shell: bash
         run: |
           set -euo pipefail
-          cd termux-packages
+          cd termux-packages-main
           ./scripts/setup-ubuntu.sh
 
       - name: Resolve package list and build options
@@ -86,55 +103,29 @@ jobs:
           for raw in "${abi_arr[@]}"; do
             abi="$(echo "$raw" | xargs)"
             [[ -z "$abi" ]] && continue
-            if ! printf '%s\n' "${allowed_abis[@]}" | grep -qx "$abi"; then
-              echo "Unsupported ABI: $abi"
-              echo "Allowed ABIs: arm,aarch64,i686,x86_64"
-              exit 1
-            fi
+            printf '%s\n' "${allowed_abis[@]}" | grep -qx "$abi" || { echo "Unsupported ABI: $abi"; exit 1; }
             normalized_abis+=("$abi")
           done
-          if [[ ${#normalized_abis[@]} -eq 0 ]]; then
-            echo "No valid ABI provided."
-            exit 1
-          fi
 
           IFS=',' read -r -a dir_arr <<< "${{ github.event.inputs.package-dirs }}"
           normalized_dirs=()
           for raw in "${dir_arr[@]}"; do
             dir="$(echo "$raw" | xargs)"
-            [[ -z "$dir" ]] && continue
             case "$dir" in
               disabled-packages|packages|root-packages|x11-packages) normalized_dirs+=("$dir") ;;
               *) echo "Unsupported package dir: $dir"; exit 1 ;;
             esac
           done
-          if [[ ${#normalized_dirs[@]} -eq 0 ]]; then
-            echo "No valid package directories selected."
-            exit 1
-          fi
 
-          prefix="${{ github.event.inputs.package-prefix }}"
           read -r -a raw_pkgs <<< "${{ github.event.inputs.packages }}"
-          if [[ ${#raw_pkgs[@]} -eq 0 ]]; then
-            echo "No packages were provided."
-            exit 1
-          fi
-
           resolved_pkgs=()
           for pkg in "${raw_pkgs[@]}"; do
-            candidate="${prefix}${pkg}"
             found=""
             for dir in "${normalized_dirs[@]}"; do
-              if [[ -f "termux-packages/${dir}/${candidate}/build.sh" ]]; then
-                found="$candidate"
-                break
-              fi
+              [[ -f "termux-packages-main/${dir}/${pkg}/build.sh" ]] && found="$pkg" && break
             done
-            if [[ -z "$found" ]]; then
-              echo "Package not found in selected directories: $candidate"
-              exit 1
-            fi
-            resolved_pkgs+=("$found")
+            [[ -n "$found" ]] || { echo "Package not found: $pkg"; exit 1; }
+            resolved_pkgs+=("$pkg")
           done
 
           printf 'abis=%s\n' "$(IFS=','; echo "${normalized_abis[*]}")" >> "$GITHUB_OUTPUT"
@@ -144,28 +135,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cd termux-packages
-
-          if [[ "${{ github.event.inputs.clean-before-build }}" == 'true' ]]; then
-            ./scripts/run-docker.sh ./build-package.sh -c
-          fi
-
-          docker_args=()
-          if [[ "${{ github.event.inputs.use-remote-docker }}" == 'true' ]]; then
-            docker_args+=(--remote)
-          fi
+          cd termux-packages-main
+          [[ "${{ github.event.inputs.clean-before-build }}" == 'true' ]] && ./scripts/run-docker.sh ./build-package.sh -c
 
           build_args=()
-          if [[ "${{ github.event.inputs.with-deps }}" == 'true' ]]; then
-            build_args+=(-I)
-          fi
-          if [[ "${{ github.event.inputs.skip-checks }}" == 'true' ]]; then
-            build_args+=(-s)
-          fi
+          [[ "${{ github.event.inputs.with-deps }}" == 'true' ]] && build_args+=(-I)
+          [[ "${{ github.event.inputs.skip-checks }}" == 'true' ]] && build_args+=(-s)
 
           for abi in $(echo "${{ steps.resolve.outputs.abis }}" | tr ',' ' '); do
             for pkg in ${{ steps.resolve.outputs.packages }}; do
-              ./scripts/run-docker.sh "${docker_args[@]}" ./build-package.sh -a "$abi" "${build_args[@]}" "$pkg"
+              ./scripts/run-docker.sh ./build-package.sh -a "$abi" "${build_args[@]}" "$pkg"
             done
           done
 
@@ -174,9 +153,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          find termux-packages/output -type f \
-            \( -name "*.deb" -o -name "*.buildinfo" -o -name "*.changes" -o -name "*.log" \) \
-            -print0 | tar --null -czf artifacts/termux-packages-custom-build.tar.gz --files-from -
+          find termux-packages-main/output -type f \( -name "*.deb" -o -name "*.buildinfo" -o -name "*.changes" -o -name "*.log" \) -print0 |
+            tar --null -czf artifacts/termux-packages-custom-build.tar.gz --files-from -
 
       - name: Upload packed artifact
         uses: actions/upload-artifact@v4
