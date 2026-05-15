@@ -55,7 +55,7 @@ index 53bb59d..e1e55fb 100755
 -			fi
 -		done
 -		unset add_pkg
-+		PACKAGES+=("openjdk-21")
++		PACKAGES+=("openjdk-17")
  
  		# Build packages.
  		for package_name in "${PACKAGES[@]}"; do
