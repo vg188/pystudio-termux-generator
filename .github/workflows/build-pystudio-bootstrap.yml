@@ -1,0 +1,162 @@
+name: Build PyStudio Bootstrap
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build-pystudio-bootstrap.yml"
+      - "build-termux.sh"
+      - "scripts/**"
+      - "f-droid-patches/**"
+      - "play-store-patches/**"
+      - "plugins/**"
+      - "custom-packages/**"
+  workflow_dispatch:
+    inputs:
+      architectures:
+        description: "Bootstrap architectures, comma-separated."
+        required: false
+        default: "aarch64"
+      additional_packages:
+        description: "Extra packages to include in the bootstrap, comma-separated."
+        required: false
+        default: ""
+      publish_release:
+        description: "Publish artifacts to a GitHub release."
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pystudio-bootstrap-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYSTUDIO_PACKAGE_NAME: com.vchangxiao.pystudio
+  DEFAULT_ARCHITECTURES: aarch64
+
+jobs:
+  build:
+    name: Build PyStudio bootstrap
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve inputs
+        id: inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          architectures="${{ github.event.inputs.architectures }}"
+          additional_packages="${{ github.event.inputs.additional_packages }}"
+          publish_release="${{ github.event.inputs.publish_release }}"
+
+          if [[ -z "$architectures" ]]; then
+            architectures="$DEFAULT_ARCHITECTURES"
+          fi
+
+          if [[ -z "$publish_release" ]]; then
+            publish_release="true"
+          fi
+
+          safe_architectures="${architectures//,/-}"
+
+          {
+            echo "architectures=$architectures"
+            echo "additional_packages=$additional_packages"
+            echo "publish_release=$publish_release"
+            echo "safe_architectures=$safe_architectures"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build bootstrap only
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          args=(
+            --name "$PYSTUDIO_PACKAGE_NAME"
+            --type f-droid
+            --architectures "${{ steps.inputs.outputs.architectures }}"
+            --disable-terminal
+            --disable-tasker
+            --disable-float
+            --disable-widget
+            --disable-api
+            --disable-boot
+            --disable-styling
+            --disable-gui
+            --disable-x11
+          )
+
+          if [[ -n "${{ steps.inputs.outputs.additional_packages }}" ]]; then
+            args+=(--add "${{ steps.inputs.outputs.additional_packages }}")
+          fi
+
+          ./build-termux.sh "${args[@]}"
+
+      - name: Collect bootstrap assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          mkdir -p artifacts
+
+          bootstrap_count=0
+          for bootstrap in *bootstrap-*.tar.xz termux-packages-main/bootstrap-*.tar.xz; do
+            [[ -f "$bootstrap" ]] || continue
+            filename="$(basename "$bootstrap")"
+            arch="$(sed -E 's/.*bootstrap-([^.]*)\.tar\.xz$/\1/' <<< "$filename")"
+            cp -f "$bootstrap" "artifacts/bootstrap-${arch}.tar.xz"
+            cp -f "$bootstrap" "artifacts/${PYSTUDIO_PACKAGE_NAME}-f-droid-bootstrap-${arch}.tar.xz"
+            bootstrap_count=$((bootstrap_count + 1))
+          done
+
+          for xz_dir in termux-packages-main/xz-* xz-*; do
+            [[ -d "$xz_dir" ]] || continue
+            cp -a "$xz_dir" artifacts/
+          done
+
+          if [[ "$bootstrap_count" -eq 0 ]]; then
+            echo "No bootstrap tarballs were produced."
+            exit 1
+          fi
+
+          tar -czf "pystudio-bootstrap-assets-${{ steps.inputs.outputs.safe_architectures }}.tar.gz" -C artifacts .
+          mv "pystudio-bootstrap-assets-${{ steps.inputs.outputs.safe_architectures }}.tar.gz" artifacts/
+
+          (
+            cd artifacts
+            find . -type f ! -name SHA256SUMS.txt -print0 |
+              sort -z |
+              xargs -0 sha256sum > SHA256SUMS.txt
+          )
+
+          find artifacts -maxdepth 3 -type f -print
+
+      - name: Upload bootstrap artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pystudio-bootstrap-${{ steps.inputs.outputs.safe_architectures }}-${{ github.run_number }}
+          path: artifacts/**
+          if-no-files-found: error
+
+      - name: Create release
+        if: ${{ steps.inputs.outputs.publish_release == 'true' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: pystudio-bootstrap-r${{ github.run_number }}
+          name: PyStudio bootstrap r${{ github.run_number }}
+          files: |
+            artifacts/bootstrap-*.tar.xz
+            artifacts/com.vchangxiao.pystudio-f-droid-bootstrap-*.tar.xz
+            artifacts/pystudio-bootstrap-assets-*.tar.gz
+            artifacts/SHA256SUMS.txt

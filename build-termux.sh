@@ -9,7 +9,7 @@ TERMUX_APP__PACKAGE_NAME="com.termux"
 TERMUX_APP_TYPE="f-droid"
 DO_NOT_CLEAN=""
 TERMUX_GENERATOR_PLUGIN=""
-ADDITIONAL_PACKAGES="xkeyboard-config" # for termux-x11-nightly which is always preinstalled
+ADDITIONAL_PACKAGES=""
 BOOTSTRAP_ARCHITECTURES=""
 DISABLE_BOOTSTRAP_SECOND_STAGE=""
 ENABLE_SSH_SERVER=""
@@ -79,6 +79,17 @@ show_usage() {
     echo
 }
 
+append_additional_package() {
+    local package_name="$1"
+    if [[ ",$ADDITIONAL_PACKAGES," != *",$package_name,"* ]]; then
+        if [ -n "$ADDITIONAL_PACKAGES" ]; then
+            ADDITIONAL_PACKAGES+=",$package_name"
+        else
+            ADDITIONAL_PACKAGES="$package_name"
+        fi
+    fi
+}
+
 # Argumente verarbeiten
 while (($# > 0)); do
     case "$1" in
@@ -91,7 +102,11 @@ while (($# > 0)); do
             ;;
         -a|--add)
             if [ $# -gt 1 ] && [ -n "$2" ] && [[ $2 != -* ]]; then
-                ADDITIONAL_PACKAGES+=",$2"
+                if [ -n "$ADDITIONAL_PACKAGES" ]; then
+                    ADDITIONAL_PACKAGES+=",$2"
+                else
+                    ADDITIONAL_PACKAGES="$2"
+                fi
                 shift 1
             else
                 echo "[!] Option '--add' requires an argument."

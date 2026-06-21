@@ -171,11 +171,18 @@ build_bootstraps() {
 
     local bootstrap_script_args=""
 
-    if [ -n "$ENABLE_SSH_SERVER" ]; then
-        ADDITIONAL_PACKAGES+=",openssh"
+    if [ -z "${DISABLE_X11}" ]; then
+        # termux-x11-nightly needs this package in the bootstrap when X11 is bundled.
+        append_additional_package "xkeyboard-config"
     fi
 
-    bootstrap_script_args+=" --add ${ADDITIONAL_PACKAGES}"
+    if [ -n "$ENABLE_SSH_SERVER" ]; then
+        append_additional_package "openssh"
+    fi
+
+    if [ -n "$ADDITIONAL_PACKAGES" ]; then
+        bootstrap_script_args+=" --add ${ADDITIONAL_PACKAGES}"
+    fi
 
     if [[ "$TERMUX_APP_TYPE" == "f-droid" ]]; then
         local bootstrap_script="build-bootstraps.sh"
