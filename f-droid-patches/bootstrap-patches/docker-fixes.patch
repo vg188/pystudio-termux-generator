@@ -1,3 +1,5 @@
+diff --git a/scripts/build/toolchain/termux_setup_toolchain_29.sh b/scripts/build/toolchain/termux_setup_toolchain_29.sh
+index 27abb3e..17e5583 100644
 --- a/scripts/build/toolchain/termux_setup_toolchain_29.sh
 +++ b/scripts/build/toolchain/termux_setup_toolchain_29.sh
 @@ -133,7 +133,7 @@ termux_setup_toolchain_29() {
@@ -9,7 +11,7 @@
  		fuse-overlayfs \
  			"${TERMUX_STANDALONE_TOOLCHAIN}" \
  			-o lowerdir="${NDK}/toolchains/llvm/prebuilt/linux-x86_64" \
-@@ -145,12 +146,17 @@ termux_setup_toolchain_29() {
+@@ -145,12 +145,17 @@ termux_setup_toolchain_29() {
  		return
  	fi
  
@@ -27,6 +29,32 @@
  	# Remove android-support header wrapping not needed on android-21:
  	rm -Rf $TERMUX_STANDALONE_TOOLCHAIN/sysroot/usr/local
  
+diff --git a/scripts/free-space.sh b/scripts/free-space.sh
+index 8978b5f..6163574 100755
+--- a/scripts/free-space.sh
++++ b/scripts/free-space.sh
+@@ -16,7 +16,7 @@ else
+ 		dpkg -l |
+ 			grep '^ii' |
+ 			awk '{ print $2 }' |
+-			grep -P '(mecab|linux-azure-tools-|aspnetcore|liblldb-|netstandard-|llvm|clang|gcc-12|gcc-13|gcc-14|gcc-15|cpp-|g\+\+-|temurin-|gfortran-|mysql-|google-cloud-cli|postgresql-|cabal-|dotnet-|ghc-|mongodb-|libmono|mesa-|ant|liblua|python3|grub2-|grub-|shim-signed)'
++			grep -P '(mecab|linux-azure-tools-|aspnetcore|liblldb-|netstandard-|llvm|clang|gcc-12|gcc-13|gcc-14|gcc-15|cpp-|g\+\+-|gfortran-|mysql-|google-cloud-cli|postgresql-|cabal-|dotnet-|ghc-|mongodb-|libmono|mesa-|ant|liblua|python3|grub2-|grub-|shim-signed)'
+ 	)
+ 
+ 	sudo apt purge -yq \
+@@ -40,7 +40,10 @@ else
+ 	sudo rm -rf /opt/ghc /opt/az /opt/hostedtoolcache /opt/actionarchivecache /opt/runner-cache
+ 	sudo rm -rf /opt/pipx /usr/share/dotnet /usr/share/swift /usr/share/miniconda /usr/share/az_* /usr/share/gradle-* /usr/share/java /home/runner/.rustup
+ 	sudo rm -rf /etc/skel /home/packer /home/linuxbrew
++	sudo mv /usr/local/lib/android "$HOME"
+ 	sudo rm -rf /usr/local /usr/src/
++	sudo mkdir -p /usr/local/lib
++	sudo mv "$HOME/android" /usr/local/lib/
+ 
+ 	# https://github.com/actions/runner-images/issues/709#issuecomment-612569242
+ 	sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+diff --git a/scripts/run-docker.sh b/scripts/run-docker.sh
+index 9a78671..65884bd 100755
 --- a/scripts/run-docker.sh
 +++ b/scripts/run-docker.sh
 @@ -92,7 +92,7 @@ if [ "$UNAME" = Darwin ]; then
@@ -39,32 +67,10 @@
  
  if [ "${CI:-}" = "true" ]; then
 @@ -138,6 +138,7 @@ if [ -z "$APPARMOR_PARSER" ] || ! $SUDO aa-status --enabled; then
-        echo "         Avoid executing untrusted code in the container"
-        APPARMOR_PARSER=""
+ 	echo "         Avoid executing untrusted code in the container"
+ 	APPARMOR_PARSER=""
  fi
 +APPARMOR_PARSER=""
  
  load_apparmor_profile() {
-        local profile_path="$1"
-+++ a/scripts/free-space.sh
-+++ b/scripts/free-space.sh
-@@ -16,7 +16,7 @@ else
- 		dpkg -l |
- 			grep '^ii' |
- 			awk '{ print $2 }' |
--			grep -P '(mecab|linux-azure-tools-|aspnetcore|liblldb-|netstandard-|llvm|clang|gcc-12|gcc-13|cpp-|g\+\+-|temurin-|gfortran-|mysql-|google-cloud-cli|postgresql-|cabal-|dotnet-|ghc-|mongodb-|libmono|mesa-|ant|liblua|python3|grub2-|grub-|shim-signed)'
-+			grep -P '(mecab|linux-azure-tools-|aspnetcore|liblldb-|netstandard-|llvm|clang|gcc-12|gcc-13|cpp-|g\+\+-|gfortran-|mysql-|google-cloud-cli|postgresql-|cabal-|dotnet-|ghc-|mongodb-|libmono|mesa-|ant|liblua|python3|grub2-|grub-|shim-signed)'
- 	)
- 
- 	sudo apt purge -yq \
-@@ -41,7 +41,10 @@ else
- 	sudo rm -rf /opt/ghc /opt/az /opt/hostedtoolcache /opt/actionarchivecache /opt/runner-cache
- 	sudo rm -rf /opt/pipx /usr/share/dotnet /usr/share/swift /usr/share/miniconda /usr/share/az_* /usr/share/gradle-* /usr/share/java /home/runner/.rustup
- 	sudo rm -rf /etc/skel /home/packer /home/linuxbrew
-+	sudo mv /usr/local/lib/android "$HOME"
- 	sudo rm -rf /usr/local /usr/src/
-+	sudo mkdir -p /usr/local/lib
-+	sudo mv "$HOME/android" /usr/local/lib/
- 
- 	# https://github.com/actions/runner-images/issues/709#issuecomment-612569242
- 	sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+ 	local profile_path="$1"
