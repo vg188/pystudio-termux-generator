@@ -1,17 +1,6 @@
 name: Build PyStudio Bootstrap
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - ".github/workflows/build-pystudio-bootstrap.yml"
-      - "build-termux.sh"
-      - "scripts/**"
-      - "f-droid-patches/**"
-      - "play-store-patches/**"
-      - "plugins/**"
-      - "custom-packages/**"
   workflow_dispatch:
     inputs:
       architectures:
